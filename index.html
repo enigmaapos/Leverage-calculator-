@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Leverage Profit & Loss Calculator</title>
+
+  <!-- Tailwind Play CDN for quick standalone styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    /* small extra for number inputs in dark bg to match component look */
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 min-h-screen flex items-start justify-center py-10">
+  <div id="app" class="bg-gray-900 text-gray-200 border border-gray-700 rounded-lg p-4 w-full max-w-md mx-auto">
+    <h2 class="text-lg font-semibold text-white mb-4">📈 Leverage Profit & Loss Calculator</h2>
+
+    <div class="space-y-3">
+      <div class="flex justify-between items-center">
+        <label class="text-sm">🪙 Capital (Margin)</label>
+        <input id="capital" type="number" step="0.01" min="0" class="bg-gray-800 border border-gray-600 text-sm p-1 px-2 rounded w-24 text-right" />
+      </div>
+
+      <div class="flex justify-between items-center">
+        <label class="text-sm">📊 Leverage</label>
+        <input id="leverage" type="number" step="1" min="1" class="bg-gray-800 border border-gray-600 text-sm p-1 px-2 rounded w-24 text-right" />
+      </div>
+    </div>
+
+    <div class="mt-5">
+      <h3 class="text-sm text-gray-400 mb-2">💰 Estimated Gain/Loss:</h3>
+
+      <div class="flex items-center gap-2 mb-3">
+        <input id="inputPercent" type="number" step="0.01" placeholder="Add % move" class="bg-gray-800 border border-gray-600 text-sm p-1 px-2 rounded w-24" />
+        <button id="addBtn" class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1 rounded">➕ Add</button>
+      </div>
+
+      <ul id="movesList" class="space-y-2 text-sm"></ul>
+    </div>
+
+    <p id="liquidationNote" class="mt-4 text-xs text-yellow-300"></p>
+  </div>
+
+  <script>
+    (function () {
+      // Initial state (same as your React component)
+      let capital = 10;
+      let leverage = 20;
+      let percentageMoves = [4, 7, 10];
+
+      // DOM elements
+      const elCapital = document.getElementById('capital');
+      const elLeverage = document.getElementById('leverage');
+      const elInputPercent = document.getElementById('inputPercent');
+      const elAddBtn = document.getElementById('addBtn');
+      const elMovesList = document.getElementById('movesList');
+      const elLiquidationNote = document.getElementById('liquidationNote');
+
+      // Initialize inputs
+      elCapital.value = capital;
+      elLeverage.value = leverage;
+
+      function positionSize() {
+        return capital * leverage;
+      }
+      function liquidationThreshold() {
+        // same formula: approx % loss that would liquidate: 100 / leverage
+        return 100 / leverage;
+      }
+
+      function calculateProfit(percent) {
+        return ((percent / 100) * positionSize()).toFixed(2);
+      }
+      function calculateLoss(percent) {
+        return ((percent / 100) * positionSize()).toFixed(2);
+      }
+
+      function render() {
+        // update liquidation note
+        elLiquidationNote.innerHTML = `⚠️ Approx. liquidation threshold: <span class="font-bold">${liquidationThreshold().toFixed(2)}%</span> loss at ${leverage}x leverage.`;
+
+        // clear list
+        elMovesList.innerHTML = '';
+
+        // ensure unique sorted
+        const uniqueSorted = Array.from(new Set(percentageMoves)).sort((a,b) => a - b);
+
+        uniqueSorted.forEach((p) => {
+          const isLiquidation = p >= liquidationThreshold();
+
+          const li = document.createElement('li');
+          li.className = `flex flex-col gap-1 p-2 border rounded ${isLiquidation ? 'border-red-500 bg-red-900/40' : 'border-gray-700'}`;
+
+          // top row
+          const top = document.createElement('div');
+          top.className = 'flex justify-between';
+
+          const gainSpan = document.createElement('span');
+          gainSpan.innerHTML = `📈 ${p}% Gain → <span class="text-green-400">+$${calculateProfit(p)}</span>`;
+
+          const removeBtn = document.createElement('span');
+          removeBtn.className = 'cursor-pointer text-red-400 hover:text-red-600 text-xs';
+          removeBtn.style.userSelect = 'none';
+          removeBtn.innerText = '✖';
+          removeBtn.addEventListener('click', () => {
+            handleRemove(p);
+          });
+
+          top.appendChild(gainSpan);
+          top.appendChild(removeBtn);
+
+          // bottom row
+          const bottom = document.createElement('div');
+          bottom.className = 'flex justify-between';
+
+          const lossSpan = document.createElement('span');
+          lossSpan.innerHTML = `📉 ${p}% Loss → `;
+          const lossValue = document.createElement('span');
+          lossValue.innerText = `-$${calculateLoss(p)}`;
+          lossValue.className = isLiquidation ? 'text-red-500 font-bold' : 'text-yellow-300';
+
+          lossSpan.appendChild(lossValue);
+
+          bottom.appendChild(lossSpan);
+
+          if (isLiquidation) {
+            const warn = document.createElement('span');
+            warn.className = 'text-xs text-red-400 font-semibold';
+            warn.innerText = '⚠️ Risk of Liquidation';
+            bottom.appendChild(warn);
+          }
+
+          li.appendChild(top);
+          li.appendChild(bottom);
+
+          elMovesList.appendChild(li);
+        });
+      }
+
+      function handleAddPercent() {
+        const parsed = parseFloat(elInputPercent.value);
+        if (!isNaN(parsed)) {
+          // combine with existing unique set and sort
+          percentageMoves = Array.from(new Set([...percentageMoves, parsed]));
+          percentageMoves.sort((a,b) => a - b);
+          elInputPercent.value = '';
+          render();
+        } else {
+          // optional tiny feedback: shake or highlight - keep simple alert
+          // alert('Please enter a valid number for % move.');
+        }
+      }
+
+      function handleRemove(percent) {
+        percentageMoves = percentageMoves.filter(p => p !== percent);
+        render();
+      }
+
+      // Event listeners
+      elAddBtn.addEventListener('click', handleAddPercent);
+
+      // allow enter to add
+      elInputPercent.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleAddPercent();
+        }
+      });
+
+      // update capital/leverage reactively
+      elCapital.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        capital = isNaN(val) ? 0 : val;
+        render();
+      });
+
+      elLeverage.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        leverage = isNaN(val) || val <= 0 ? 1 : val;
+        render();
+      });
+
+      // initial render
+      render();
+    })();
+  </script>
+</body>
+</html>
