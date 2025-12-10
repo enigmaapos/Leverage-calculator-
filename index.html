@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Leverage Widget — ROE, PnL, Liquidation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+    input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin:0; }
+  </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex items-start justify-center p-4">
+  <div class="w-full max-w-md bg-gradient-to-b from-gray-800 to-gray-900 border border-gray-700 rounded-2xl p-4 shadow-lg">
+    <header class="flex items-center justify-between mb-4">
+      <h1 class="text-lg font-semibold">📱 Leverage Widget</h1>
+      <span class="text-xs text-gray-400">mobile-friendly</span>
+    </header>
+
+    <!-- Controls -->
+    <div class="space-y-3 mb-3">
+      <div>
+        <label class="text-xs text-gray-300">🪙 Margin (capital)</label>
+        <div class="flex gap-2">
+          <input id="capital" type="number" min="0" step="0.01" class="flex-1 bg-gray-800 border border-gray-700 rounded p-2 text-right" />
+          <input id="capitalSlider" type="range" min="1" max="1000" step="1" class="w-32" />
+        </div>
+      </div>
+
+      <div>
+        <label class="text-xs text-gray-300">📊 Leverage</label>
+        <div class="flex gap-2 items-center">
+          <input id="leverage" type="number" min="1" max="200" step="1" class="bg-gray-800 border border-gray-700 rounded p-2 w-24 text-right" />
+          <input id="levSlider" type="range" min="1" max="200" step="1" class="flex-1" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-gray-300">Entry Price</label>
+          <input id="entryPrice" type="number" min="0.0001" step="0.01" class="bg-gray-800 border border-gray-700 rounded p-2 w-full text-right"/>
+        </div>
+        <div>
+          <label class="text-xs text-gray-300">Exit Price (simulate)</label>
+          <input id="exitPrice" type="number" min="0.0001" step="0.01" class="bg-gray-800 border border-gray-700 rounded p-2 w-full text-right"/>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-gray-300">Side</label>
+          <select id="side" class="bg-gray-800 border border-gray-700 rounded p-2 w-full text-sm">
+            <option value="long">Long</option>
+            <option value="short">Short</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-300">Maintenance Rate (%)</label>
+          <input id="maintRate" type="number" min="0" max="5" step="0.01" value="0.50" class="bg-gray-800 border border-gray-700 rounded p-2 w-full text-right"/>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-xs text-gray-300">Add % moves (slider or input)</label>
+        <div class="flex gap-2">
+          <input id="moveInput" type="number" placeholder="e.g. 4" step="0.01" class="bg-gray-800 border border-gray-700 rounded p-2 w-28 text-right"/>
+          <button id="addMove" class="bg-green-600 hover:bg-green-700 rounded px-3 py-2 text-xs">➕ Add</button>
+          <input id="moveSlider" type="range" min="0" max="50" step="0.1" class="flex-1" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <section class="bg-gray-850/40 p-3 rounded border border-gray-700 space-y-2">
+      <div class="flex justify-between text-xs text-gray-400">
+        <span>Position Size</span>
+        <span id="positionSize">—</span>
+      </div>
+      <div class="flex justify-between text-xs text-gray-400">
+        <span>ROE (on margin)</span>
+        <span id="roe">—</span>
+      </div>
+      <div class="flex justify-between text-xs text-gray-400">
+        <span>Estimated Liquidation Price</span>
+        <span id="liqPrice" class="font-semibold">—</span>
+      </div>
+      <div class="flex justify-between text-xs text-gray-400">
+        <span>Liquidation distance</span>
+        <span id="liqDist">—</span>
+      </div>
+    </section>
+
+    <!-- Moves list & PnL compare -->
+    <div class="mt-3">
+      <h2 class="text-sm font-medium mb-2">Scenarios</h2>
+      <ul id="moves" class="space-y-2 text-sm"></ul>
+    </div>
+
+    <div class="mt-3 text-xs text-gray-400">
+      <p>Formula note: liquidation used here is a practical Binance-style approximation that depends on entry price, leverage and maintenance margin rate (user-editable). See Binance documentation for the full tiered formula.</p>
+    </div>
+  </div>
+
+  <script>
+    // --- Utility functions
+    const $ = id => document.getElementById(id);
+    const fmt = n => Number(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    // --- Elements
+    const capitalEl = $('capital');
+    const capitalSlider = $('capitalSlider');
+    const leverageEl = $('leverage');
+    const levSlider = $('levSlider');
+    const entryEl = $('entryPrice');
+    const exitEl = $('exitPrice');
+    const sideEl = $('side');
+    const maintEl = $('maintRate');
+    const moveInput = $('moveInput');
+    const addMoveBtn = $('addMove');
+    const moveSlider = $('moveSlider');
+    const movesList = $('moves');
+    const positionSizeEl = $('positionSize');
+    const roeEl = $('roe');
+    const liqPriceEl = $('liqPrice');
+    const liqDistEl = $('liqDist');
+
+    // --- State (defaults)
+    let capital = 10;
+    let leverage = 20;
+    let entryPrice = 100;
+    let exitPrice = 104;
+    let side = 'long';
+    let maintRate = 0.5; // percent
+    let moves = [4, 7, 10];
+
+    // init inputs with defaults
+    function initInputs() {
+      capitalEl.value = capital;
+      capitalSlider.value = Math.min(Math.max(capital,1),1000);
+      leverageEl.value = leverage;
+      levSlider.value = leverage;
+      entryEl.value = entryPrice;
+      exitEl.value = exitPrice;
+      moveSlider.value = 4;
+      moveInput.value = '';
+      maintEl.value = maintRate;
+      sideEl.value = side;
+    }
+
+    // helpers
+    function posSize() { return capital * leverage; }
+    function addMove(p) {
+      if (isNaN(p)) return;
+      p = Number(p);
+      if (!moves.includes(p)) moves.push(p);
+      moves.sort((a,b)=>a-b);
+      renderMoves();
+    }
+    function removeMove(p) {
+      moves = moves.filter(x => x !== p);
+      renderMoves();
+    }
+
+    function roeFromProfit(profit) {
+      if (capital === 0) return 0;
+      return (profit / capital) * 100;
+    }
+
+    function pnlFromPercent(percent) {
+      const p = percent / 100;
+      return p * posSize();
+    }
+
+    function pnlFromPrices(side, entry, exit) {
+      const notional = posSize();
+      if (entry <= 0) return 0;
+      if (side === 'long') {
+        const ret = (exit - entry) / entry;
+        return ret * notional;
+      } else {
+        const ret = (entry - exit) / entry;
+        return ret * notional;
+      }
+    }
+
+    // Approximate Binance-style liquidation — user can adjust maintenance rate
+    function estimateLiquidationPrice(entry, lev, maintPct, side) {
+      const m = maintPct / 100;
+      if (side === 'long') {
+        return entry * (1 - 1 / lev + m);
+      } else {
+        return entry * (1 + 1 / lev - m);
+      }
+    }
+
+    function renderSummary() {
+      positionSizeEl.innerText = `$${fmt(posSize())}`;
+      const entry = Number(entryEl.value || entryPrice);
+      const liq = estimateLiquidationPrice(entry, Number(leverageEl.value || leverage), Number(maintEl.value || maintRate), sideEl.value);
+      liqPriceEl.innerText = liq > 0 ? `$${fmt(liq)}` : '—';
+      const distPct = entry !== 0 ? ((Math.abs(entry - liq) / entry) * 100) : 0;
+      liqDistEl.innerText = `${fmt(distPct)}%`;
+    }
+
+    function renderMoves() {
+      movesList.innerHTML = '';
+      renderSummary();
+
+      const entry = Number(entryEl.value || entryPrice);
+
+      moves.forEach(pct => {
+        const li = document.createElement('li');
+        li.className = 'p-2 bg-gray-800 border border-gray-700 rounded flex flex-col gap-1';
+
+        // top row
+        const row = document.createElement('div');
+        row.className = 'flex justify-between items-center';
+
+        const left = document.createElement('div');
+        left.innerHTML = `<span class="text-xs">Move: <strong>${pct}%</strong></span>`;
+
+        const pnl = pnlFromPercent(pct);
+        const pnlSpan = document.createElement('div');
+        pnlSpan.className = 'text-sm font-medium';
+        pnlSpan.innerText = (pnl >= 0 ? `+$${fmt(pnl)}` : `-$${fmt(Math.abs(pnl))}`);
+
+        row.appendChild(left);
+        row.appendChild(pnlSpan);
+
+        // second row: ROE and remove
+        const row2 = document.createElement('div');
+        row2.className = 'flex justify-between items-center text-xs text-gray-300';
+
+        const roeVal = roeFromProfit(pnl);
+        const pnlLong = pnlFromPrices('long', entry, entry * (1 + pct/100));
+        const pnlShort = pnlFromPrices('short', entry, entry * (1 - pct/100));
+
+        const detail = document.createElement('div');
+        detail.innerHTML = `<div>${fmt(roeVal)}% ROE</div><div class="text-xs mt-1">Long ~ ${pnlLong>=0?'+':''}$${fmt(pnlLong)} • Short ~ ${pnlShort>=0?'+':''}$${fmt(pnlShort)}</div>`;
+
+        const rem = document.createElement('button');
+        rem.className = 'text-red-400 text-xs';
+        rem.innerText = 'Remove';
+        rem.onclick = () => removeMove(pct);
+
+        row2.appendChild(detail);
+        row2.appendChild(rem);
+
+        li.appendChild(row);
+        li.appendChild(row2);
+
+        // check liquidation warning
+        if (entry > 0) {
+          const liq = estimateLiquidationPrice(entry, Number(leverageEl.value || leverage), Number(maintEl.value || maintRate), sideEl.value);
+          // compute percent distance to liquidation in same direction
+          let absMoveIfLoss;
+          if (sideEl.value === 'long') {
+            absMoveIfLoss = ((entry - liq) / entry) * 100;
+          } else {
+            absMoveIfLoss = ((liq - entry) / entry) * 100;
+          }
+          if (pct >= Math.abs(absMoveIfLoss)) {
+            li.classList.add('border-red-500', 'bg-red-900/40');
+            const warn = document.createElement('div');
+            warn.className = 'text-xs text-red-400 font-semibold mt-1';
+            warn.innerText = '⚠️ Risk of Liquidation';
+            li.appendChild(warn);
+          }
+        }
+
+        movesList.appendChild(li);
+      });
+
+      // update ROE display (show placeholder or aggregated ROE for first move)
+      const firstProfit = moves.length ? pnlFromPercent(moves[0]) : 0;
+      roeEl.innerText = moves.length ? `${fmt(roeFromProfit(firstProfit))}% (example)` : '—';
+    }
+
+    // --- events sync sliders and inputs
+    capitalEl.addEventListener('input', e => {
+      capital = parseFloat(e.target.value) || 0;
+      capitalSlider.value = Math.min(Math.max(capital,1),1000);
+      renderMoves();
+    });
+    capitalSlider.addEventListener('input', e => {
+      capital = parseFloat(e.target.value) || 0;
+      capitalEl.value = capital;
+      renderMoves();
+    });
+
+    leverageEl.addEventListener('input', e => {
+      leverage = parseFloat(e.target.value) || 1;
+      levSlider.value = leverage;
+      renderMoves();
+    });
+    levSlider.addEventListener('input', e => {
+      leverage = parseFloat(e.target.value) || 1;
+      leverageEl.value = leverage;
+      renderMoves();
+    });
+
+    entryEl.addEventListener('input', e => { entryPrice = parseFloat(e.target.value) || 0; renderMoves(); });
+    exitEl.addEventListener('input', e => { exitPrice = parseFloat(e.target.value) || 0; renderMoves(); });
+    sideEl.addEventListener('change', e => { side = e.target.value; renderMoves(); });
+    maintEl.addEventListener('input', e => { maintRate = parseFloat(e.target.value) || 0; renderMoves(); });
+
+    moveSlider.addEventListener('input', e => { moveInput.value = e.target.value; });
+    addMoveBtn.addEventListener('click', () => {
+      const val = parseFloat(moveInput.value || moveSlider.value);
+      if (!isNaN(val)) addMove(Number(val.toFixed(2)));
+      moveInput.value = '';
+    });
+
+    // init & first render
+    initInputs();
+    renderMoves();
+  </script>
+</body>
+</html>
